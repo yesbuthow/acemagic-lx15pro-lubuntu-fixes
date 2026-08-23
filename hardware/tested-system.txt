@@ -1,0 +1,44 @@
+Tested machine
+==============
+
+Model: ACEMAGIC LX15PRO
+
+CPU:
+AMD Ryzen 7 7730U
+8 cores / 16 threads
+Barcelo / Zen 3
+
+GPU:
+AMD Radeon integrated graphics
+Renoir / Barcelo
+PCI ID observed: 1002:15e7
+Driver: amdgpu
+Mesa: RadeonSI / RADV
+
+RAM:
+16 GiB DDR4
+Observed as 1 x 16 GiB
+
+Storage:
+512 GB NVMe
+KY3100-512GB
+MAXIO MAP1202 controller
+
+Network:
+Realtek RTL8852BE
+Driver: rtw89_8852be
+
+Internal display:
+X11 output: eDP
+DRM connector observed: card1-eDP-1
+Backlight: amdgpu_bl1
+
+Known-good tested kernel:
+7.0.0-1011-oem
+
+Known problematic kernels during troubleshooting:
+7.0.0-30-generic
+7.0.0-14-generic (internal panel boot issue without HDMI)
+
+NOTE:
+Hardware revisions may vary even under the same commercial model.

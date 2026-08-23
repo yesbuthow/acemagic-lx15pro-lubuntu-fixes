@@ -1,0 +1,10 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Iberna
+Comment=Iberna il computer e gestisce automaticamente il display al risveglio
+Exec=/home/YOUR_USER/.local/bin/iberna-smart
+Icon=system-suspend-hibernate
+Terminal=false
+Categories=System;
+StartupNotify=false

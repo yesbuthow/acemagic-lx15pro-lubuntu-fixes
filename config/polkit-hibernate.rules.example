@@ -1,0 +1,10 @@
+// Replace YOUR_USER with the local desktop username.
+polkit.addRule(function(action, subject) {
+    if ((action.id == "org.freedesktop.login1.hibernate" ||
+         action.id == "org.freedesktop.login1.hibernate-multiple-sessions") &&
+        subject.user == "YOUR_USER" &&
+        subject.local &&
+        subject.active) {
+        return polkit.Result.YES;
+    }
+});
