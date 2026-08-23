@@ -18,6 +18,198 @@ The final setup uses the Ubuntu OEM kernel, `dracut` resume support, a swapfile 
 
 > This is **not** an official ACEMAGIC or Ubuntu project. ACEMAGIC may ship different hardware revisions under the same model name. Verify your hardware before applying anything.
 
+## Start here: which problem do you have?
+
+You do **not** necessarily need every fix in this repository.
+
+### A. Internal screen is black during a normal boot
+
+Symptoms:
+
+- Lubuntu starts but the internal eDP panel remains black;
+- booting with an external HDMI/DisplayPort monitor may behave differently;
+- `nomodeset` may make the machine boot, but disables normal AMDGPU acceleration.
+
+Start with the **Ubuntu OEM kernel** section below. On the tested machine,
+`7.0.0-1011-oem` fixed normal boot of the internal display.
+
+### B. Normal boot works, but hibernation is unavailable or does not resume
+
+Start with [`docs/hibernation.md`](docs/hibernation.md).
+
+The complete setup covers Secure Boot/kernel lockdown, swapfile creation,
+`resume_offset`, GRUB, the `dracut` resume module and
+`HibernateMode=shutdown`.
+
+### C. Hibernation restores the session, but the display stays black
+
+Start with [`scripts/iberna-smart`](scripts/iberna-smart) and
+[`docs/troubleshooting.md`](docs/troubleshooting.md).
+
+On the tested machine, AMDGPU restored the hibernated session correctly while
+the display path remained black and the kernel logged DMCUB-related errors.
+Resetting the internal eDP output and forcing DPMS on recovered it.
+
+---
+
+## Fresh Lubuntu 26.04 -> working hibernation
+
+If you are starting from a fresh Lubuntu installation and want to reproduce
+the complete tested setup, use this order:
+
+1. **Verify that your hardware matches the tested system.**
+
+   See [`hardware/tested-system.txt`](hardware/tested-system.txt). ACEMAGIC may
+   ship different hardware revisions under the same product name.
+
+2. **Install the Ubuntu OEM kernel.**
+
+   ```bash
+   sudo apt update
+   sudo apt install linux-oem-26.04
+   ```
+
+   Reboot and check:
+
+   ```bash
+   uname -r
+   ```
+
+   The known-good kernel during testing was `7.0.0-1011-oem`. Treat that as a
+   tested reference, not a version to pin forever.
+
+3. **Check whether Secure Boot / lockdown blocks hibernation.**
+
+   ```bash
+   mokutil --sb-state
+   cat /sys/kernel/security/lockdown
+   cat /sys/power/state
+   ```
+
+   On the tested machine, Secure Boot had to be disabled before `disk`
+   became available as a sleep state.
+
+4. **Create a swapfile.**
+
+   The tested setup used 20 GiB:
+
+   ```bash
+   sudo swapoff /swapfile 2>/dev/null || true
+   sudo rm -f /swapfile
+   sudo fallocate -l 20G /swapfile
+   sudo chmod 600 /swapfile
+   sudo mkswap /swapfile
+   sudo swapon /swapfile
+   ```
+
+   Add this to `/etc/fstab`:
+
+   ```text
+   /swapfile swap swap defaults 0 0
+   ```
+
+5. **Calculate your own `resume_offset`.**
+
+   ```bash
+   ./scripts/calc-resume-offset.sh /swapfile
+   ```
+
+   **Never copy the offset from another machine or from an older swapfile.**
+   Recalculate it whenever `/swapfile` is recreated or moved.
+
+6. **Find the filesystem UUID containing the swapfile.**
+
+   ```bash
+   findmnt -no UUID /
+   ```
+
+   Add both values to `GRUB_CMDLINE_LINUX_DEFAULT`:
+
+   ```text
+   resume=UUID=<YOUR_ROOT_UUID> resume_offset=<YOUR_RESUME_OFFSET>
+   ```
+
+   Then:
+
+   ```bash
+   sudo update-grub
+   ```
+
+7. **Enable resume support in dracut.**
+
+   ```bash
+   sudo mkdir -p /etc/dracut.conf.d
+   sudo cp config/dracut-resume.conf /etc/dracut.conf.d/resume.conf
+   sudo dracut --regenerate-all --force
+   ```
+
+   Reboot and verify:
+
+   ```bash
+   cat /sys/power/resume
+   cat /sys/power/resume_offset
+   ```
+
+   `/sys/power/resume` should no longer be `0:0`.
+
+8. **Use full shutdown after writing the hibernation image.**
+
+   ```bash
+   sudo mkdir -p /etc/systemd/sleep.conf.d
+   sudo cp config/hibernate.conf /etc/systemd/sleep.conf.d/hibernate.conf
+   ```
+
+9. **Configure the screen lock.**
+
+   The tested Lubuntu/X11 system used XScreenSaver. LXQt's additional
+   pre-sleep locker was disabled with:
+
+   ```ini
+   [General]
+   lock_screen_before_power_actions=false
+   ```
+
+   See [`config/lxqt-session-snippet.ini`](config/lxqt-session-snippet.ini).
+
+10. **Allow the active local user to request hibernation.**
+
+    Copy and edit
+    [`config/polkit-hibernate.rules.example`](config/polkit-hibernate.rules.example),
+    replacing `YOUR_USER` with the local username.
+
+11. **Install the smart hibernation wrapper.**
+
+    ```bash
+    mkdir -p ~/.local/bin
+    cp scripts/iberna-smart ~/.local/bin/iberna-smart
+    chmod +x ~/.local/bin/iberna-smart
+    ```
+
+12. **Optionally create the desktop launcher.**
+
+    Start from [`config/Iberna.desktop.example`](config/Iberna.desktop.example)
+    and replace `YOUR_USER`.
+
+13. **Test with important work saved.**
+
+    ```bash
+    cat /sys/power/state
+    cat /sys/power/disk
+    ~/.local/bin/iberna-smart
+    ```
+
+14. **Inspect the result.**
+
+    ```bash
+    journalctl -b --no-pager -o short-monotonic | \
+    grep -Ei 'Performing sleep operation|System returned from sleep operation|iberna-smart|hibernate'
+    ```
+
+For the detailed explanation of every step, see
+[`docs/hibernation.md`](docs/hibernation.md).
+
+---
+
 ## What worked
 
 ### 1. OEM kernel
