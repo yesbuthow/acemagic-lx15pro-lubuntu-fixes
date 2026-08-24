@@ -275,10 +275,12 @@ reliably recovered the internal display.
 The final [`scripts/iberna-smart`](scripts/iberna-smart) wrapper:
 
 - locks XScreenSaver first;
+- waits for XScreenSaver to emit a real `LOCK` event before requesting hibernation;
 - hibernates without requiring a root password when the Polkit rule is installed;
 - detects whether the internal eDP panel was enabled before hibernation;
 - detects whether an external monitor exists after resume;
 - automatically enables eDP if the laptop wakes away from the desk;
+- leaves an already-active laptop-only eDP link untouched after resume, avoiding a fragile extra AMDGPU/DPCD link-training cycle;
 - otherwise preserves the user's monitor layout;
 - performs the fast eDP reset only when needed;
 - forces DPMS back on.

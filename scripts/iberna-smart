@@ -11,15 +11,45 @@ logger -t iberna-smart "Prima dell'ibernazione: eDP attivo=$EDP_WAS_ON"
 
 # Blocca esplicitamente la sessione.
 # Se il lock fallisce, per sicurezza NON iberniamo.
+LOCK_LOG="$(mktemp)"
+
+# Avviamo il watcher PRIMA di richiedere il lock, così non perdiamo
+# l'evento LOCK emesso da XScreenSaver.
+timeout 3s xscreensaver-command -watch >"$LOCK_LOG" 2>&1 &
+WATCH_PID=$!
+
+sleep 0.1
+
 if ! xscreensaver-command -lock >/dev/null 2>&1; then
-    logger -t iberna-smart "ERRORE: impossibile bloccare XScreenSaver; ibernazione annullata"
+    kill "$WATCH_PID" 2>/dev/null || true
+    wait "$WATCH_PID" 2>/dev/null || true
+    rm -f "$LOCK_LOG"
+
+    logger -t iberna-smart "ERRORE: impossibile richiedere il lock XScreenSaver; ibernazione annullata"
     exit 1
 fi
 
-# Piccolo margine perché XScreenSaver completi il lock.
-sleep 0.2
+LOCK_SEEN=0
 
-# Nessuna password amministratore se la regola Polkit è installata.
+for i in {1..40}; do
+    if grep -q '^LOCK ' "$LOCK_LOG" 2>/dev/null; then
+        LOCK_SEEN=1
+        break
+    fi
+    sleep 0.05
+done
+
+kill "$WATCH_PID" 2>/dev/null || true
+wait "$WATCH_PID" 2>/dev/null || true
+rm -f "$LOCK_LOG"
+
+if [ "$LOCK_SEEN" -ne 1 ]; then
+    logger -t iberna-smart "ERRORE: XScreenSaver non ha confermato LOCK; ibernazione annullata"
+    exit 1
+fi
+
+logger -t iberna-smart "XScreenSaver LOCK confermato"
+
 /usr/bin/systemctl hibernate
 RET=$?
 
@@ -28,19 +58,23 @@ if [ "$RET" -ne 0 ]; then
     exit "$RET"
 fi
 
-# systemctl può restituire prima che l'ibernazione sia materialmente iniziata.
-# Questo margine impedisce che il codice post-resume corra troppo presto.
-# Durante il vero sleep il processo viene congelato, quindi il costo al
-# ritorno è normalmente minimo.
+#
+# systemctl può restituire il controllo PRIMA che l'ibernazione
+# sia realmente iniziata. Aspettiamo quindi che il servizio
+# systemd-hibernate diventi attivo.
+#
+
+# Piccolo margine perché systemd avvii realmente l'ibernazione.
+# Quando il sistema viene congelato, anche questo sleep viene congelato.
 sleep 0.75
 
 logger -t iberna-smart "Resume reale: avvio ripristino display"
 
-# Prova subito a togliere il DPMS nero.
-xset s reset >/dev/null 2>&1 || true
-xset dpms force on >/dev/null 2>&1 || true
+# Non forziamo ancora DPMS ON: prima lasciamo stabilizzare AMDGPU
+# e completiamo la gestione dei display. Il wake avverrà alla fine.
 
-# Attendi XRandR soltanto se non è ancora pronto.
+# Invece di aspettare 1 secondo fisso, attendiamo XRandR.
+# Massimo ~1 secondo, ma normalmente usciamo quasi subito.
 XRANDR=""
 
 for i in {1..20}; do
@@ -59,12 +93,25 @@ logger -t iberna-smart "Dopo resume: monitor esterno attivo=$EXTERNAL_ACTIVE"
 
 if [ "$EXTERNAL_ACTIVE" -eq 0 ]; then
 
-    # Nessun monitor esterno: il pannello del portatile deve funzionare.
-    logger -t iberna-smart "Nessun monitor esterno: reset rapido eDP"
+    if [ "$EDP_WAS_ON" -eq 1 ]; then
 
-    xrandr --output eDP --off
-    sleep 0.2
-    xrandr --output eDP --auto
+        # Laptop-only: eDP era già attivo prima dell'ibernazione.
+        # Non forziamo OFF/ON: AMDGPU ha appena ripristinato il link
+        # e un nuovo link-training può fallire durante il recovery DMCUB.
+        logger -t iberna-smart "Laptop-only: eDP era già attivo, non modifico il link"
+
+    else
+
+        # Prima dell'ibernazione eDP era spento (tipicamente uso con
+        # monitor esterno), ma ora non c'è più alcun monitor esterno.
+        # In questo caso dobbiamo necessariamente riattivare il pannello.
+        logger -t iberna-smart "Monitor esterno assente ed eDP prima spento: attivo eDP"
+
+        xrandr --output eDP --off
+        sleep 0.2
+        xrandr --output eDP --auto || true
+
+    fi
 
 elif [ "$EDP_WAS_ON" -eq 1 ]; then
 

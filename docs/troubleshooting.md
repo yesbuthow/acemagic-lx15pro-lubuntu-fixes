@@ -100,3 +100,54 @@ A naive post-resume script may therefore execute **before the machine has actual
 The final wrapper deliberately leaves a short synchronization margin (`sleep 0.75`). Once the sleep transition starts, that process itself is frozen; on resume only the remaining fraction is paid.
 
 This eliminated a race observed during testing.
+
+## Laptop-only resume: do not reset an already-active eDP link
+
+A later test exposed an important special case:
+
+- the laptop was hibernated with only the internal eDP panel active;
+- after resume the desktop appeared briefly;
+- forcing `xrandr --output eDP --off` followed by `--auto` triggered repeated
+  DMCUB/DPCD errors and eventually:
+
+```text
+enabling link 0 failed: 15
+```
+
+The correct workaround was **not** to reset the panel in this case.
+
+If eDP was already active before hibernation and no external display is active
+after resume, `iberna-smart` now leaves the eDP link untouched and only wakes
+DPMS after display handling is complete.
+
+This avoids forcing AMDGPU to perform another eDP link-training cycle while
+the display engine is still recovering.
+
+The eDP OFF/ON recovery is still useful when eDP was previously disabled
+(for example, the laptop was used only with an external monitor) and the
+external monitor is no longer present after resume.
+
+## Lock screen synchronization
+
+Another observed race was that requesting the XScreenSaver lock and sleeping
+for a fixed delay did not prove that the lock screen was actually ready before
+hibernation.
+
+The wrapper now starts:
+
+```bash
+xscreensaver-command -watch
+```
+
+before requesting the lock and waits for the explicit:
+
+```text
+LOCK ...
+```
+
+event. Hibernation is aborted if XScreenSaver does not confirm the lock.
+
+The early post-resume `xset dpms force on` was also removed. DPMS is now
+forced on only after display handling, which prevents the desktop from being
+briefly exposed before the lock screen has been redrawn.
+
